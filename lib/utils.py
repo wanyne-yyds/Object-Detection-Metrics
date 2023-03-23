@@ -123,3 +123,21 @@ def add_bb_into_image(image, bb, color=(255, 0, 0), thickness=2, label=None):
         cv2.putText(image, label, (xin_bb, yin_bb), font, fontScale, (0, 0, 0), fontThickness,
                     cv2.LINE_AA)
     return image
+
+def showAllap(allAP, savePath):
+    import matplotlib.pyplot as plt
+    import os.path
+    plt.close()
+    plt.figure(figsize=(10,7))
+
+    for key, value in allAP.items():
+        classes = key
+        recall, precision = value
+        plt.plot(recall, precision, label=classes)
+        plt.xlabel('recall')
+        plt.ylabel('precision')
+        plt.title('Precision x Recall curve')
+        plt.legend(shadow=True)
+        plt.grid()
+    plt.savefig(os.path.join(savePath, 'AllAP.png'))
+    plt.close()

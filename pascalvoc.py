@@ -55,7 +55,7 @@ import _init_paths
 from BoundingBox import BoundingBox
 from BoundingBoxes import BoundingBoxes
 from Evaluator import *
-from utils import BBFormat
+from utils import BBFormat, showAllap
 
 
 # Validate formats
@@ -342,15 +342,15 @@ os.makedirs(savePath)
 # Show plot during execution
 showPlot = args.showPlot
 
-# print('iouThreshold= %f' % iouThreshold)
-# print('savePath = %s' % savePath)
-# print('gtFormat = %s' % gtFormat)
-# print('detFormat = %s' % detFormat)
-# print('gtFolder = %s' % gtFolder)
-# print('detFolder = %s' % detFolder)
-# print('gtCoordType = %s' % gtCoordType)
-# print('detCoordType = %s' % detCoordType)
-# print('showPlot %s' % showPlot)
+print('iouThreshold= %f' % iouThreshold)
+print('savePath = %s' % savePath)
+print('gtFormat = %s' % gtFormat)
+print('detFormat = %s' % detFormat)
+print('gtFolder = %s' % gtFolder)
+print('detFolder = %s' % detFolder)
+print('gtCoordType = %s' % gtCoordType)
+print('detCoordType = %s' % detCoordType)
+print('showPlot %s' % showPlot)
 
 # Get groundtruth boxes
 allBoundingBoxes, allClasses = getBoundingBoxes(gtFolder,
@@ -373,7 +373,7 @@ acc_AP = 0
 validClasses = 0
 
 # Plot Precision x Recall curve
-detections = evaluator.PlotPrecisionRecallCurve(
+detections, sumclassesdict = evaluator.PlotPrecisionRecallCurve(
     allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
     IOUThreshold=iouThreshold,  # IOU threshold
     method=MethodAveragePrecision.EveryPointInterpolation,
@@ -381,6 +381,8 @@ detections = evaluator.PlotPrecisionRecallCurve(
     showInterpolatedPrecision=False,  # Don't plot the interpolated precision curve
     savePath=savePath,
     showGraphic=showPlot)
+
+showAllap(sumclassesdict, savePath)
 
 f = open(os.path.join(savePath, 'results.txt'), 'w')
 f.write('Object Detection Metrics\n')
@@ -402,8 +404,8 @@ for metricsPerClass in detections:
     if totalPositives > 0:
         validClasses = validClasses + 1
         acc_AP = acc_AP + ap
-        prec = ['%.2f' % p for p in precision]
-        rec = ['%.2f' % r for r in recall]
+        prec = ['%f' % p for p in precision]
+        rec = ['%f' % r for r in recall]
         ap_str = "{0:.2f}%".format(ap * 100)
         # ap_str = "{0:.4f}%".format(ap * 100)
         print('AP: %s (%s)' % (ap_str, cl))

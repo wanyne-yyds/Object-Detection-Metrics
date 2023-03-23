@@ -189,6 +189,7 @@ class Evaluator:
         """
         results = self.GetPascalVOCMetrics(boundingBoxes, IOUThreshold, method)
         result = None
+        sumclassesdict = dict()
         # Each resut represents a class
         for result in results:
             if result is None:
@@ -203,7 +204,8 @@ class Evaluator:
             npos = result['total positives']
             total_tp = result['total TP']
             total_fp = result['total FP']
-
+            classandap = classId + " AP: {0:.2f}%".format(average_precision * 100)
+            sumclassesdict[classandap] = [recall, precision]
             plt.close()
             if showInterpolatedPrecision:
                 if method == MethodAveragePrecision.EveryPointInterpolation:
@@ -289,7 +291,8 @@ class Evaluator:
                 plt.show()
                 # plt.waitforbuttonpress()
                 plt.pause(0.05)
-        return results
+
+        return results, sumclassesdict
 
     @staticmethod
     def CalculateAveragePrecision(rec, prec):

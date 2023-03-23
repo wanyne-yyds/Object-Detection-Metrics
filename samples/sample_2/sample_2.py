@@ -23,8 +23,9 @@ def getBoundingBoxes():
     import glob
     import os
     # Read ground truths
-    currentPath = os.path.dirname(os.path.abspath(__file__))
-    folderGT = os.path.join(currentPath, 'groundtruths')
+    # currentPath = os.path.dirname(os.path.abspath(__file__))
+    currentPath = '/data_ssd/ckn_ssd/Data_trainset/NewHODTestData'
+    folderGT = os.path.join(currentPath, 'obj_groundtruths')
     os.chdir(folderGT)
     files = glob.glob("*.txt")
     files.sort()
@@ -59,11 +60,11 @@ def getBoundingBoxes():
                 h,
                 CoordinatesType.Absolute, (200, 200),
                 BBType.GroundTruth,
-                format=BBFormat.XYWH)
+                format=BBFormat.XYX2Y2)
             allBoundingBoxes.addBoundingBox(bb)
         fh1.close()
     # Read detections
-    folderDet = os.path.join(currentPath, 'detections')
+    folderDet = os.path.join(currentPath, 'obj_detections')
     os.chdir(folderDet)
     files = glob.glob("*.txt")
     files.sort()
@@ -100,7 +101,7 @@ def getBoundingBoxes():
                 CoordinatesType.Absolute, (200, 200),
                 BBType.Detected,
                 confidence,
-                format=BBFormat.XYWH)
+                format=BBFormat.XYX2Y2)
             allBoundingBoxes.addBoundingBox(bb)
         fh1.close()
     return allBoundingBoxes
@@ -121,14 +122,15 @@ def createImages(dictGroundTruth, dictDetected):
         detection_boundingboxes = dictDetected[key]
         image = detection_boundingboxes.drawAllBoundingBoxes(image)
         # Show detection and its GT
-        cv2.imshow(key, image)
-        cv2.waitKey()
+        # cv2.imwrite
+        # cv2.imshow(key, image)
+        # cv2.waitKey()
 
 
 # Read txt files containing bounding boxes (ground truth and detections)
 boundingboxes = getBoundingBoxes()
 # Uncomment the line below to generate images based on the bounding boxes
-# createImages(dictGroundTruth, dictDetected)
+createImages(dictGroundTruth, dictDetected)
 # Create an evaluator object in order to obtain the metrics
 evaluator = Evaluator()
 ##############################################################
@@ -157,4 +159,6 @@ for mc in metricsPerClass:
     ipre = mc['interpolated precision']
     irec = mc['interpolated recall']
     # Print AP per class
-    print('%s: %f' % (c, average_precision))
+    # print('%s: %f' % (c, average_precision))
+    # print(recall)
+    # print(precision)
