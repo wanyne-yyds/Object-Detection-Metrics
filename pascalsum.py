@@ -54,6 +54,6 @@ def draw_pr_curve(pr_values, out_file):
     plt.close()
 
 if __name__ == "__main__":
-    path_file = r'/home/ckn/Code/Object-Detection-Metrics/results/bsd/Two'
+    path_file = r'/home/ckn/Code/Object-Detection-Metrics/results/bsd/Two/Big_dataset'
     pr_values = get_file_content(path_file)
     draw_pr_curve(pr_values, path_file)

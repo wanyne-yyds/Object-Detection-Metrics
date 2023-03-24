@@ -137,7 +137,7 @@ def getBoundingBoxes(directory,
         allClasses = []
     # Read ground truths
     os.chdir(directory)
-    files = glob.glob("*.txt")
+    files = glob.glob("**/*.txt", recursive=True)
     files.sort()
     # Read GT detections from txt file
     # Each line of the files in the groundtruths folder represents a ground truth bounding box
@@ -294,6 +294,7 @@ else:
     gtFolder = os.path.join(currentPath, 'groundtruths')
     if os.path.isdir(gtFolder) is False:
         errors.append('folder %s not found' % gtFolder)
+
 # Coordinates types
 gtCoordType = ValidateCoordinatesTypes(args.gtCoordinates, '-gtCoordinates', errors)
 detCoordType = ValidateCoordinatesTypes(args.detCoordinates, '-detCoordinates', errors)
