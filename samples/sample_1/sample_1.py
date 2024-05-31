@@ -13,12 +13,14 @@
 ###########################################################################################
 
 import os
-
-import _init_paths
 import cv2
-from BoundingBox import BoundingBox
-from BoundingBoxes import BoundingBoxes
-from utils import *
+import sys
+parent_path = os.path.abspath(os.path.join(__file__, *(['..']*3)))
+sys.path.insert(0, parent_path)
+
+from lib.BoundingBox import BoundingBox
+from lib.BoundingBoxes import BoundingBoxes
+from lib.utils import *
 
 ###########################
 # Defining bounding boxes #

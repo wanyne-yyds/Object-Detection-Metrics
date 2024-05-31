@@ -10,11 +10,14 @@
 #        Last modification: May 24th 2018                                                 #
 ###########################################################################################
 
-import _init_paths
-from BoundingBox import BoundingBox
-from BoundingBoxes import BoundingBoxes
-from Evaluator import *
-from utils import *
+import os
+import sys
+parent_path = os.path.abspath(os.path.join(__file__, *(['..']*3)))
+sys.path.insert(0, parent_path)
+from lib.BoundingBox import BoundingBox
+from lib.BoundingBoxes import BoundingBoxes
+from lib.Evaluator import *
+from lib.utils import *
 
 
 def getBoundingBoxes():
@@ -130,7 +133,7 @@ def createImages(dictGroundTruth, dictDetected):
 # Read txt files containing bounding boxes (ground truth and detections)
 boundingboxes = getBoundingBoxes()
 # Uncomment the line below to generate images based on the bounding boxes
-createImages(dictGroundTruth, dictDetected)
+# createImages(dictGroundTruth, dictDetected)
 # Create an evaluator object in order to obtain the metrics
 evaluator = Evaluator()
 ##############################################################
