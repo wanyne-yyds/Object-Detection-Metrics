@@ -1,5 +1,6 @@
 from enum import Enum
-
+import numpy as np
+import torch
 import cv2
 
 
@@ -42,13 +43,11 @@ class BBFormat(Enum):
     """
     Class representing the format of a bounding box.
     It can be (X,Y,width,height) => XYWH
-    or (X1,Y1,X2,Y2) => XYX2Y2
-
-        Developed by: Rafael Padilla
-        Last modification: May 24 2018
+    or (X1,Y1,X2,Y2) => XYX2Y2 or (X1,Y1,X2,Y2,X3,Y3,X4,Y4) => XYXYXYXY
     """
     XYWH = 1
     XYX2Y2 = 2
+    XYXYXYXY = 3
 
 
 # size => (width, height) of the image
@@ -141,3 +140,56 @@ def showAllap(allAP, savePath):
         plt.grid()
     plt.savefig(os.path.join(savePath, 'AllAP.png'))
     plt.close()
+
+def xyxyxyxy2xywhr(corners):
+    """
+    Convert batched Oriented Bounding Boxes (OBB) from [xy1, xy2, xy3, xy4] to [xywh, rotation]. Rotation values are
+    expected in degrees from 0 to 90.
+
+    Args:
+        corners (numpy.ndarray | torch.Tensor): Input corners of shape (n, 8).
+
+    Returns:
+        (numpy.ndarray | torch.Tensor): Converted data in [cx, cy, w, h, rotation] format of shape (n, 5).
+    """
+    is_torch = isinstance(corners, torch.Tensor)
+    points = corners.cpu().numpy() if is_torch else corners
+    points = points.reshape(len(corners), -1, 2)
+    rboxes = []
+    for pts in points:
+        # NOTE: Use cv2.minAreaRect to get accurate xywhr,
+        # especially some objects are cut off by augmentations in dataloader.
+        (x, y), (w, h), angle = cv2.minAreaRect(pts)
+        rboxes.append([x, y, w, h, angle / 180 * np.pi])
+    return (
+        torch.tensor(rboxes, device=corners.device, dtype=corners.dtype)
+        if is_torch
+        else np.asarray(rboxes, dtype=points.dtype)
+    )  # rboxes
+
+def xywhr2xyxyxyxy(rboxes):
+    """
+    Convert batched Oriented Bounding Boxes (OBB) from [xywh, rotation] to [xy1, xy2, xy3, xy4]. Rotation values should
+    be in degrees from 0 to 90.
+
+    Args:
+        rboxes (numpy.ndarray | torch.Tensor): Boxes in [cx, cy, w, h, rotation] format of shape (n, 5) or (b, n, 5).
+
+    Returns:
+        (numpy.ndarray | torch.Tensor): Converted corner points of shape (n, 4, 2) or (b, n, 4, 2).
+    """
+    is_numpy = isinstance(rboxes, np.ndarray)
+    cos, sin = (np.cos, np.sin) if is_numpy else (torch.cos, torch.sin)
+
+    ctr = rboxes[..., :2]
+    w, h, angle = (rboxes[..., i : i + 1] for i in range(2, 5))
+    cos_value, sin_value = cos(angle), sin(angle)
+    vec1 = [w / 2 * cos_value, w / 2 * sin_value]
+    vec2 = [-h / 2 * sin_value, h / 2 * cos_value]
+    vec1 = np.concatenate(vec1, axis=-1) if is_numpy else torch.cat(vec1, dim=-1)
+    vec2 = np.concatenate(vec2, axis=-1) if is_numpy else torch.cat(vec2, dim=-1)
+    pt1 = ctr + vec1 + vec2
+    pt2 = ctr + vec1 - vec2
+    pt3 = ctr - vec1 - vec2
+    pt4 = ctr - vec1 + vec2
+    return np.stack([pt1, pt2, pt3, pt4], axis=-2) if is_numpy else torch.stack([pt1, pt2, pt3, pt4], dim=-2)
