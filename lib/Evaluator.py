@@ -10,7 +10,9 @@
 
 import os
 import sys
+import math
 from collections import Counter
+from matplotlib.ticker import MultipleLocator
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +26,7 @@ class Evaluator:
     def GetPascalVOCMetrics(self,
                             boundingboxes,
                             IOUThreshold=0.5,
+                            OBB=False,
                             method=MethodAveragePrecision.EveryPointInterpolation):
         """Get the metrics used by the VOC Pascal 2012 challenge.
         Get
@@ -63,14 +66,14 @@ class Evaluator:
                 groundTruths.append([
                     bb.getImageName(),
                     bb.getClassId(), 1,
-                    bb.getAbsoluteBoundingBox(BBFormat.XYX2Y2)
+                    bb.getAbsoluteBoundingBox(BBFormat.XYWHR if OBB else BBFormat.XYX2Y2)
                 ])
             else:
                 detections.append([
                     bb.getImageName(),
                     bb.getClassId(),
                     bb.getConfidence(),
-                    bb.getAbsoluteBoundingBox(BBFormat.XYX2Y2)
+                    bb.getAbsoluteBoundingBox(BBFormat.XYWHR if OBB else BBFormat.XYX2Y2)
                 ])
             # get class
             if bb.getClassId() not in classes:
@@ -96,17 +99,22 @@ class Evaluator:
             FP = np.zeros(len(dects))
             # create dictionary with amount of gts for each image
             det = {key: np.zeros(len(gts[key])) for key in gts}
-
+        
             # print("Evaluating class: %s (%d detections)" % (str(c), len(dects)))
             # Loop through detections
+            threshold_list = list()
             for d in range(len(dects)):
                 # print('dect %s => %s' % (dects[d][0], dects[d][3],))
                 # Find ground truth image
                 gt = gts[dects[d][0]] if dects[d][0] in gts else []
+                threshold_list.append(dects[d][2])
                 iouMax = sys.float_info.min
                 for j in range(len(gt)):
                     # print('Ground truth gt => %s' % (gt[j][3],))
-                    iou = Evaluator.iou(dects[d][3], gt[j][3])
+                    if OBB:
+                        iou = Evaluator.probiou(dects[d][3], gt[j][3])
+                    else:
+                        iou = Evaluator.iou(dects[d][3], gt[j][3])
                     if iou > iouMax:
                         iouMax = iou
                         jmax = j
@@ -143,7 +151,8 @@ class Evaluator:
                 'interpolated recall': mrec,
                 'total positives': npos,
                 'total TP': np.sum(TP),
-                'total FP': np.sum(FP)
+                'total FP': np.sum(FP),
+                'threshold': threshold_list,
             }
             ret.append(r)
         return ret
@@ -153,6 +162,7 @@ class Evaluator:
                                  IOUThreshold=0.5,
                                  method=MethodAveragePrecision.EveryPointInterpolation,
                                  showAP=False,
+                                 obb=False,
                                  showInterpolatedPrecision=False,
                                  savePath=None,
                                  showGraphic=True):
@@ -169,6 +179,7 @@ class Evaluator:
             or EveryPointInterpolation"  (ElevenPointInterpolation).
             showAP (optional): if True, the average precision value will be shown in the title of
             the graph (default = False);
+            obb (optional): if True, the detections are assumed to be oriented bounding boxes
             showInterpolatedPrecision (optional): if True, it will show in the plot the interpolated
              precision (default = False);
             savePath (optional): if informed, the plot will be saved as an image in this path
@@ -187,7 +198,7 @@ class Evaluator:
             dict['total TP']: total number of True Positive detections;
             dict['total FP']: total number of False Negative detections;
         """
-        results = self.GetPascalVOCMetrics(boundingBoxes, IOUThreshold, method)
+        results = self.GetPascalVOCMetrics(boundingBoxes, IOUThreshold, obb, method)
         result = None
         sumclassesdict = dict()
         # Each resut represents a class
@@ -204,6 +215,7 @@ class Evaluator:
             npos = result['total positives']
             total_tp = result['total TP']
             total_fp = result['total FP']
+            threshold = result['threshold']
             classandap = classId + " AP: {0:.2f}%".format(average_precision * 100)
             sumclassesdict[classandap] = [recall, precision]
             plt.close()
@@ -223,7 +235,14 @@ class Evaluator:
                             nrec.append(r)
                             nprec.append(max([mpre[int(id)] for id in idxEq]))
                     plt.plot(nrec, nprec, 'or', label='11-point interpolated precision')
+            ax = plt.gca()
+            x_major_locator = MultipleLocator(0.1) #设置主刻度标签的倍数
+            y_major_locator = MultipleLocator(0.1)
+            ax.xaxis.set_major_locator(x_major_locator)
+            ax.yaxis.set_major_locator(y_major_locator)
             plt.plot(recall, precision, label='Precision')
+            if threshold is not None:
+                plt.plot(recall, threshold, '--', label='threshold')
             plt.xlabel('recall')
             plt.ylabel('precision')
             if showAP:
@@ -285,6 +304,8 @@ class Evaluator:
             #                 xytext=vecPositions[idx], textcoords='offset points',
             #                 arrowprops=dict(arrowstyle="->", connectionstyle="arc3"),
             #                 bbox=box)
+            plt.xlim([-0.0, 1.0])
+            plt.ylim([-0.0, 1.0])
             if savePath is not None:
                 plt.savefig(os.path.join(savePath, str(classId) + '.png'))
             if showGraphic is True:
@@ -395,6 +416,59 @@ class Evaluator:
         iou = interArea / union
         assert iou >= 0
         return iou
+    
+    @staticmethod
+    def _get_covariance_matrix(boxes):
+        """
+        Generating covariance matrix from obbs.
+
+        Args:
+            boxes (torch.Tensor): A tensor of shape (N, 5) representing rotated bounding boxes, with xywhr format.
+
+        Returns:
+            (torch.Tensor): Covariance metrixs corresponding to original rotated bounding boxes.
+        """
+        # Gaussian bounding boxes, ignore the center points (the first two columns) because they are not needed here.
+        gbbs = torch.cat((boxes[:, 2:4].pow(2) / 12, boxes[:, 4:]), dim=-1)
+        a, b, c = gbbs.split(1, dim=-1)
+        cos = c.cos()
+        sin = c.sin()
+        cos2 = cos.pow(2)
+        sin2 = sin.pow(2)
+        return a * cos2 + b * sin2, a * sin2 + b * cos2, (a - b) * cos * sin
+
+    @staticmethod
+    def probiou(obb1, obb2, eps=1e-7):
+        """
+        Calculate the prob IoU between oriented bounding boxes, https://arxiv.org/pdf/2106.06072v1.pdf.
+
+        Args:
+            obb1 (torch.Tensor): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
+            obb2 (torch.Tensor): A tensor of shape (N, 5) representing predicted obbs, with xywhr format.
+            eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
+
+        Returns:
+            (torch.Tensor): A tensor of shape (N, ) representing obb similarities.
+        """
+        obb1 = torch.tensor(obb1).unsqueeze(0)
+        obb2 = torch.tensor(obb2).unsqueeze(0)
+        x1, y1 = obb1[..., :2].split(1, dim=-1)
+        x2, y2 = obb2[..., :2].split(1, dim=-1)
+        a1, b1, c1 = Evaluator._get_covariance_matrix(obb1)
+        a2, b2, c2 = Evaluator._get_covariance_matrix(obb2)
+
+        t1 = (
+            ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
+        ) * 0.25
+        t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
+        t3 = (
+            ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
+            / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
+            + eps
+        ).log() * 0.5
+        bd = (t1 + t2 + t3).clamp(eps, 100.0)
+        hd = (1.0 - (-bd).exp() + eps).sqrt()
+        return 1 - hd
 
     # boxA = (Ax1,Ay1,Ax2,Ay2)
     # boxB = (Bx1,By1,Bx2,By2)

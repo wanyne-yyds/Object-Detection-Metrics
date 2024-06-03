@@ -43,11 +43,11 @@ class BBFormat(Enum):
     """
     Class representing the format of a bounding box.
     It can be (X,Y,width,height) => XYWH
-    or (X1,Y1,X2,Y2) => XYX2Y2 or (X1,Y1,X2,Y2,X3,Y3,X4,Y4) => XYXYXYXY
+    or (X1,Y1,X2,Y2) => XYX2Y2 or (X, Y, width, height, ) => XYWHR
     """
     XYWH = 1
     XYX2Y2 = 2
-    XYXYXYXY = 3
+    XYWHR = 3
 
 
 # size => (width, height) of the image

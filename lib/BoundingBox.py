@@ -9,6 +9,7 @@ class BoundingBox:
                  y,
                  w,
                  h,
+                 r=None,
                  typeCoordinates=CoordinatesType.Absolute,
                  imgSize=None,
                  bbType=BBType.GroundTruth,
@@ -31,7 +32,7 @@ class BoundingBox:
             to be informed.
             classConfidence: (optional) Float value representing the confidence of the detected
             class. If detectionType is Detection, classConfidence needs to be informed.
-            format: (optional) Enum (BBFormat.XYWH or BBFormat.XYX2Y2) indicating the format of the
+            format: (optional) Enum (BBFormat.XYWH or BBFormat.XYX2Y2 or BBFormat.XYWHR) indicating the format of the
             coordinates of the bounding boxes. BBFormat.XYWH: <left> <top> <width> <height>
             BBFormat.XYX2Y2: <left> <top> <right> <bottom>.
         """
@@ -75,6 +76,12 @@ class BoundingBox:
                 self._h = h
                 self._x2 = self._x + self._w
                 self._y2 = self._y + self._h
+            elif format == BBFormat.XYWHR:  # format == BBFormat.XYWHR: <centerX> <centerY> <width> <height> <rotation>.
+                self._x2 = self._x + w * 0.5
+                self._y2 = self._y + h * 0.5
+                self._w = w
+                self._h = h
+                self._r = r
             else:  # format == BBFormat.XYX2Y2: <left> <top> <right> <bottom>.
                 self._x2 = w
                 self._y2 = h
@@ -90,6 +97,8 @@ class BoundingBox:
     def getAbsoluteBoundingBox(self, format=BBFormat.XYWH):
         if format == BBFormat.XYWH:
             return (self._x, self._y, self._w, self._h)
+        elif format == BBFormat.XYWHR:
+            return (self._x, self._y, self._w, self._h, self._r)
         elif format == BBFormat.XYX2Y2:
             return (self._x, self._y, self._x2, self._y2)
 
