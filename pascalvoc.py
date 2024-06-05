@@ -239,17 +239,27 @@ if __name__ == '__main__':
     acc_AP = 0
     validClasses = 0
 
-    # Plot Precision x Recall curve
-    detections = evaluator.PlotPrecisionRecallCurve(
+    # Plot Precision YOLOv8 Recall curve
+    detections = evaluator.PlotYOLOv8PrecisionRecallCurve(
         allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
-        IOUThreshold=iouThreshold,  # IOU threshold
-        method=MethodAveragePrecision.EveryPointInterpolation,
-        showAP=True,  # Show Average Precision in the title of the plot
-        obb=True,
-        showInterpolatedPrecision=False,  # Don't plot the interpolated precision curve
-        savePath=savePath,
-        showGraphic=showPlot)
+        OBB=True,
+        savePath=savePath,)
 
+    for name, metrics in detections.items():
+        metrics = np.array(metrics).flatten()
+        print(f"Class: {name}\tP: {metrics[0]:.3f}\tR: {metrics[1]:.3f}\tmAP50: {metrics[2]:.3f}\tmAP50-95: {metrics[3]:.3f}")
+
+    # Plot Precision x Recall curve
+    # detections = evaluator.PlotPrecisionRecallCurve(
+    #     allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
+    #     IOUThreshold=iouThreshold,  # IOU threshold
+    #     method=MethodAveragePrecision.EveryPointInterpolation,
+    #     showAP=True,  # Show Average Precision in the title of the plot
+    #     obb=True,
+    #     showInterpolatedPrecision=False,  # Don't plot the interpolated precision curve
+    #     savePath=savePath,
+    #     showGraphic=showPlot)
+    
     # f = open(os.path.join(savePath, 'results.txt'), 'w')
     # f.write('Object Detection Metrics\n')
     # f.write('https://github.com/rafaelpadilla/Object-Detection-Metrics\n\n\n')

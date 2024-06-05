@@ -13,6 +13,7 @@ import sys
 import math
 from collections import Counter
 from matplotlib.ticker import MultipleLocator
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,6 +24,150 @@ from .utils import *
 
 
 class Evaluator:
+    def __init__(self):
+        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.class_name = {'blue_white':0, 'red_white':1, 'green_white':2, 'greenT':3}
+
+    def GetYOLOv8Metrics(self,boundingboxes,OBB=False):
+        stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[])
+        niou = self.iouv.numel()
+        # List with all ground truths (Ex: [imageName,class,confidence=1, (bb coordinates XYX2Y2)])
+        groundTruths = defaultdict(list)
+        # List with all detections (Ex: [imageName,class,confidence,(bb coordinates XYX2Y2)])
+        detections = defaultdict(list)
+        # Loop through all bounding boxes and separate them into GTs and detections
+        for bb in boundingboxes.getBoundingBoxes():
+            # [imageName, class, confidence, (bb coordinates XYX2Y2)]
+            if bb.getBBType() == BBType.GroundTruth:
+                groundTruths[bb.getImageName()].append([
+                    self.class_name[bb.getClassId()],
+                    bb.getAbsoluteBoundingBox(BBFormat.XYWHR if OBB else BBFormat.XYX2Y2)
+                ])
+            else:
+                detections[bb.getImageName()].append([
+                    self.class_name[bb.getClassId()],
+                    bb.getConfidence(),
+                    bb.getAbsoluteBoundingBox(BBFormat.XYWHR if OBB else BBFormat.XYX2Y2)
+                ])
+        
+        for preds_key, preds_values in detections.items():
+            preds_values = torch.tensor([[num, float_num] + list(tuple_nums) for num, float_num, tuple_nums in preds_values])
+            npr = len(preds_values)
+            stat = dict(
+                conf = torch.zeros(0),
+                pred_cls = torch.zeros(0),
+                tp = torch.zeros(npr, niou, dtype=torch.bool)
+            )
+            pbatch = torch.tensor([[num] + list(tuple_nums) for num, tuple_nums in groundTruths[preds_key]])
+            if len(pbatch) == 0:
+                tcls, tbox = torch.empty(0), torch.empty(0, 5)
+            else:
+                tcls, tbox = pbatch[:, 0], pbatch[:, 1:]
+
+            nl = len(tcls)
+            stat["target_cls"] = tcls
+            if npr == 0:
+                if nl:
+                    for k in stats.keys():
+                        stats[k].append(stat[k])
+                continue
+
+            stat["pred_cls"] = preds_values[:, 0]
+            stat["conf"] = preds_values[:, 1]
+
+            # Evaluate detections
+            if nl:
+                iou = Evaluator.batch_probiou(tbox, preds_values[:, 2:])
+                stat["tp"] = self._match_predictions(preds_values[:, 0], tcls, iou)
+            
+            for k in stats.keys():
+                stats[k].append(stat[k])
+
+        return stats
+    
+    def PlotYOLOv8PrecisionRecallCurve(self,
+                                       boundingBoxes,
+                                       OBB=False,
+                                       savePath=None,
+                                       eps=1e-16,):
+        savePath = Path(savePath)
+        metrics = defaultdict(list)
+        results = self.GetYOLOv8Metrics(boundingBoxes, OBB)
+        stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in results.items()}  # to numpy
+        
+        tp = stats['tp']
+        conf = stats['conf']
+        pred_cls = stats['pred_cls']
+        target_cls = stats['target_cls']
+
+        # Sort by objectness
+        i = np.argsort(-conf)
+        tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+
+        # Find unique classes
+        unique_classes, nt = np.unique(target_cls, return_counts=True)
+        nc = unique_classes.shape[0]  # number of classes, number of detections
+
+        # Create Precision-Recall curve and compute AP for each class
+        x, prec_values = np.linspace(0, 1, 1000), []
+
+        # Average precision, precision and recall curves
+        ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+        for ci, c in enumerate(unique_classes):
+            i = pred_cls == c
+            n_l = nt[ci]  # number of labels
+            n_p = i.sum()  # number of predictions
+            if n_p == 0 or n_l == 0:
+                continue
+
+            # Accumulate FPs and TPs
+            fpc = (1 - tp[i]).cumsum(0)
+            tpc = tp[i].cumsum(0)
+
+            # Recall
+            recall = tpc / (n_l + eps)  # recall curve
+            r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+
+            # Precision
+            precision = tpc / (tpc + fpc)  # precision curve
+            p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+
+            # AP from recall-precision curve
+            for j in range(tp.shape[1]):
+                ap[ci, j], mpre, mrec = Evaluator._compute_ap(recall[:, j], precision[:, j])
+                if j == 0:
+                    prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
+
+        prec_values = np.array(prec_values)  # (nc, 1000)
+
+        # Compute F1 (harmonic mean of precision and recall)
+        f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
+        names = [k for k, v in self.class_name.items() if v in unique_classes]  # list: only classes that have data
+        names = dict(enumerate(names))  # to dict
+
+        plot_pr_curve(x, prec_values, ap, savePath / "PR_curve.png", names)
+        plot_mc_curve(x, f1_curve, savePath / "F1_curve.png", names, ylabel="F1")
+        plot_mc_curve(x, p_curve, savePath / "P_curve.png", names, ylabel="Precision")
+        plot_mc_curve(x, r_curve, savePath / "R_curve.png", names, ylabel="Recall")
+        
+        i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
+        p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
+        tp = (r * nt).round()  # true positives
+        fp = (tp / (p + eps) - tp).round()  # false positives
+
+        mp = p.mean() if len(p) else 0.0    # Returns the Mean Precision of all classes.
+        mr = r.mean() if len(r) else 0.0    # Returns the Mean Recall of all classes.
+        ap50 = ap[:, 0] if len(ap) else []
+        ap50_90 = ap.mean(1) if len(ap) else []
+        all_map50 = ap[:, 0].mean() if len(ap) else 0.0 # Returns the mean Average Precision (mAP) at an IoU threshold of 0.5.
+        all_map50_90 = ap.mean() if len(ap) else 0.0
+
+        metrics["all"].append([mp, mr, all_map50, all_map50_90])
+        for c, i in self.class_name.items():
+            metrics[i].append([p[i], r[i], ap50[i], ap50_90[i]])
+
+        return metrics
+
     def GetPascalVOCMetrics(self,
                             boundingboxes,
                             IOUThreshold=0.5,
@@ -438,24 +583,25 @@ class Evaluator:
         return a * cos2 + b * sin2, a * sin2 + b * cos2, (a - b) * cos * sin
 
     @staticmethod
-    def probiou(obb1, obb2, eps=1e-7):
+    def batch_probiou(obb1, obb2, eps=1e-7):
         """
         Calculate the prob IoU between oriented bounding boxes, https://arxiv.org/pdf/2106.06072v1.pdf.
 
         Args:
-            obb1 (torch.Tensor): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
-            obb2 (torch.Tensor): A tensor of shape (N, 5) representing predicted obbs, with xywhr format.
+            obb1 (torch.Tensor | np.ndarray): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
+            obb2 (torch.Tensor | np.ndarray): A tensor of shape (M, 5) representing predicted obbs, with xywhr format.
             eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
 
         Returns:
-            (torch.Tensor): A tensor of shape (N, ) representing obb similarities.
+            (torch.Tensor): A tensor of shape (N, M) representing obb similarities.
         """
-        obb1 = torch.tensor(obb1).unsqueeze(0)
-        obb2 = torch.tensor(obb2).unsqueeze(0)
+        obb1 = torch.from_numpy(obb1) if isinstance(obb1, np.ndarray) else obb1
+        obb2 = torch.from_numpy(obb2) if isinstance(obb2, np.ndarray) else obb2
+
         x1, y1 = obb1[..., :2].split(1, dim=-1)
-        x2, y2 = obb2[..., :2].split(1, dim=-1)
+        x2, y2 = (x.squeeze(-1)[None] for x in obb2[..., :2].split(1, dim=-1))
         a1, b1, c1 = Evaluator._get_covariance_matrix(obb1)
-        a2, b2, c2 = Evaluator._get_covariance_matrix(obb2)
+        a2, b2, c2 = (x.squeeze(-1)[None] for x in Evaluator._get_covariance_matrix(obb2))
 
         t1 = (
             ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
@@ -504,3 +650,78 @@ class Evaluator:
     @staticmethod
     def _getArea(box):
         return (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+
+    def _match_predictions(self, pred_classes, true_classes, iou, use_scipy=False):
+        """
+        Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
+
+        Args:
+            pred_classes (torch.Tensor): Predicted class indices of shape(N,).
+            true_classes (torch.Tensor): Target class indices of shape(M,).
+            iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
+            use_scipy (bool): Whether to use scipy for matching (more precise).
+
+        Returns:
+            (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
+        """
+        # Dx10 matrix, where D - detections, 10 - IoU thresholds
+        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        # LxD matrix where L - labels (rows), D - detections (columns)
+        correct_class = true_classes[:, None] == pred_classes
+        iou = iou * correct_class  # zero out the wrong classes
+        iou = iou.cpu().numpy()
+        for i, threshold in enumerate(self.iouv.cpu().tolist()):
+            if use_scipy:
+                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
+                import scipy  # scope import to avoid importing for all commands
+
+                cost_matrix = iou * (iou >= threshold)
+                if cost_matrix.any():
+                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
+                    valid = cost_matrix[labels_idx, detections_idx] > 0
+                    if valid.any():
+                        correct[detections_idx[valid], i] = True
+            else:
+                matches = np.nonzero(iou >= threshold)  # IoU > threshold and classes match
+                matches = np.array(matches).T
+                if matches.shape[0]:
+                    if matches.shape[0] > 1:
+                        matches = matches[iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                        # matches = matches[matches[:, 2].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                    correct[matches[:, 1].astype(int), i] = True
+        return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+    
+    @staticmethod
+    def _compute_ap(recall, precision):
+        """
+        Compute the average precision (AP) given the recall and precision curves.
+
+        Args:
+            recall (list): The recall curve.
+            precision (list): The precision curve.
+
+        Returns:
+            (float): Average precision.
+            (np.ndarray): Precision envelope curve.
+            (np.ndarray): Modified recall curve with sentinel values added at the beginning and end.
+        """
+
+        # Append sentinel values to beginning and end
+        mrec = np.concatenate(([0.0], recall, [1.0]))
+        mpre = np.concatenate(([1.0], precision, [0.0]))
+
+        # Compute the precision envelope
+        mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+
+        # Integrate area under curve
+        method = "interp"  # methods: 'continuous', 'interp'
+        if method == "interp":
+            x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
+            ap = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
+        else:  # 'continuous'
+            i = np.where(mrec[1:] != mrec[:-1])[0]  # points where x-axis (recall) changes
+            ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])  # area under curve
+
+        return ap, mpre, mrec

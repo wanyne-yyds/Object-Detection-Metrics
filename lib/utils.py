@@ -1,3 +1,6 @@
+from .__init__ import plt_settings
+import matplotlib.pyplot as plt
+from pathlib import Path
 from enum import Enum
 import numpy as np
 import torch
@@ -193,3 +196,58 @@ def xywhr2xyxyxyxy(rboxes):
     pt3 = ctr - vec1 - vec2
     pt4 = ctr - vec1 + vec2
     return np.stack([pt1, pt2, pt3, pt4], axis=-2) if is_numpy else torch.stack([pt1, pt2, pt3, pt4], dim=-2)
+
+@plt_settings()
+def plot_pr_curve(px, py, ap, save_dir=Path("pr_curve.png"), names=(), on_plot=None):
+    """Plots a precision-recall curve."""
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
+    py = np.stack(py, axis=1)
+
+    if 0 < len(names) < 21:  # display per-class legend if < 21 classes
+        for i, y in enumerate(py.T):
+            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")  # plot(recall, precision)
+    else:
+        ax.plot(px, py, linewidth=1, color="grey")  # plot(recall, precision)
+
+    ax.plot(px, py.mean(1), linewidth=3, color="blue", label="all classes %.3f mAP@0.5" % ap[:, 0].mean())
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    ax.set_title("Precision-Recall Curve")
+    fig.savefig(save_dir, dpi=250)
+    plt.close(fig)
+    if on_plot:
+        on_plot(save_dir)
+
+def smooth(y, f=0.05):
+    """Box filter of fraction f."""
+    nf = round(len(y) * f * 2) // 2 + 1  # number of filter elements (must be odd)
+    p = np.ones(nf // 2)  # ones padding
+    yp = np.concatenate((p * y[0], y, p * y[-1]), 0)  # y padded
+    return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
+
+@plt_settings()
+def plot_mc_curve(px, py, save_dir=Path("mc_curve.png"), names=(), xlabel="Confidence", ylabel="Metric", on_plot=None):
+    """Plots a metric-confidence curve."""
+    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
+
+    if 0 < len(names) < 21:  # display per-class legend if < 21 classes
+        for i, y in enumerate(py):
+            ax.plot(px, y, linewidth=1, label=f"{names[i]}")  # plot(confidence, metric)
+    else:
+        ax.plot(px, py.T, linewidth=1, color="grey")  # plot(confidence, metric)
+
+    y = smooth(py.mean(0), 0.05)
+    ax.plot(px, y, linewidth=3, color="blue", label=f"all classes {y.max():.2f} at {px[y.argmax()]:.3f}")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    ax.set_title(f"{ylabel}-Confidence Curve")
+    fig.savefig(save_dir, dpi=250)
+    plt.close(fig)
+    if on_plot:
+        on_plot(save_dir)
