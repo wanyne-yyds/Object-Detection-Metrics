@@ -1,4 +1,5 @@
 from .__init__ import plt_settings
+from matplotlib.ticker import MultipleLocator
 import matplotlib.pyplot as plt
 from pathlib import Path
 from enum import Enum
@@ -198,18 +199,25 @@ def xywhr2xyxyxyxy(rboxes):
     return np.stack([pt1, pt2, pt3, pt4], axis=-2) if is_numpy else torch.stack([pt1, pt2, pt3, pt4], dim=-2)
 
 @plt_settings()
-def plot_pr_curve(px, py, ap, save_dir=Path("pr_curve.png"), names=(), on_plot=None):
+def plot_pr_curve(px, py, ap, py_T, ap_T, save_dir=Path("pr_curve.png"), names=(), on_plot=None):
     """Plots a precision-recall curve."""
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
     py = np.stack(py, axis=1)
+    py_T = np.stack(py_T, axis=1)
+
+    x_major_locator = MultipleLocator(0.1) #设置主刻度标签的倍数
+    y_major_locator = MultipleLocator(0.1)
+    ax.xaxis.set_major_locator(x_major_locator)
+    ax.yaxis.set_major_locator(y_major_locator)
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py.T):
             ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")  # plot(recall, precision)
     else:
         ax.plot(px, py, linewidth=1, color="grey")  # plot(recall, precision)
-
-    ax.plot(px, py.mean(1), linewidth=3, color="blue", label="all classes %.3f mAP@0.5" % ap[:, 0].mean())
+        
+    ax.plot(px, py.mean(1), linewidth=3, color="blue", label="all classes mAP@0.5: %.3f " % ap[:, 0].mean())
+    ax.plot(px, py_T.mean(1), linewidth=2, color="red", linestyle="--", label="all_Threshold_0.5 mAP@0.5: %.3f" % ap_T[:, 0].mean())
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_xlim(0, 1)

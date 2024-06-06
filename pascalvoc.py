@@ -158,10 +158,10 @@ if __name__ == '__main__':
     # Groundtruth folder: folder containing your ground truth bounding boxes
     gtFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_labels_groundtruths"
     # Detection folder: folder containing your detected bounding boxes
-    detFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_labels_detections"
+    detFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_pre_labels_Yv8n"
     
     # folder where the plots are saved
-    savePath = Path(currentPath) / 'results'
+    savePath = Path(currentPath) / 'results' / 'Test_obb_pre_labels_Yv8n'
 
     # xywh: <left> <top> <width> <height>) or xyrb: <left> <top> <right> <bottom> or xywhr: xywhr
     gt_format  = 'xywhr'

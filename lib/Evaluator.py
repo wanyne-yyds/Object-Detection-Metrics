@@ -29,7 +29,7 @@ class Evaluator:
         self.class_name = {'blue_white':0, 'red_white':1, 'green_white':2, 'greenT':3}
 
     def GetYOLOv8Metrics(self,boundingboxes,OBB=False):
-        stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[])
+        stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], tp_Threshold=[], conf_Threshold=[], pred_cls_Threshold=[])
         niou = self.iouv.numel()
         # List with all ground truths (Ex: [imageName,class,confidence=1, (bb coordinates XYX2Y2)])
         groundTruths = defaultdict(list)
@@ -56,7 +56,11 @@ class Evaluator:
             stat = dict(
                 conf = torch.zeros(0),
                 pred_cls = torch.zeros(0),
-                tp = torch.zeros(npr, niou, dtype=torch.bool)
+                tp = torch.zeros(npr, niou, dtype=torch.bool),
+                
+                conf_Threshold = torch.zeros(0),
+                pred_cls_Threshold = torch.zeros(0),
+                tp_Threshold = torch.zeros(npr, niou, dtype=torch.bool)
             )
             pbatch = torch.tensor([[num] + list(tuple_nums) for num, tuple_nums in groundTruths[preds_key]])
             if len(pbatch) == 0:
@@ -75,10 +79,19 @@ class Evaluator:
             stat["pred_cls"] = preds_values[:, 0]
             stat["conf"] = preds_values[:, 1]
 
-            # Evaluate detections
+            preds_values_Threshold = preds_values[preds_values[:, 1] > 0.5]
+            if len(preds_values_Threshold) == 0:
+                stat["tp_Threshold"] = torch.zeros(0, niou, dtype=torch.bool)
+            else:
+                stat["pred_cls_Threshold"] = preds_values_Threshold[:, 0]
+                stat["conf_Threshold"] = preds_values_Threshold[:, 1]
+
             if nl:
                 iou = Evaluator.batch_probiou(tbox, preds_values[:, 2:])
                 stat["tp"] = self._match_predictions(preds_values[:, 0], tcls, iou)
+
+                iou_Threshold = Evaluator.batch_probiou(tbox, preds_values_Threshold[:, 2:])
+                stat["tp_Threshold"] = self._match_predictions(preds_values_Threshold[:, 0], tcls, iou_Threshold)
             
             for k in stats.keys():
                 stats[k].append(stat[k])
@@ -100,23 +113,34 @@ class Evaluator:
         pred_cls = stats['pred_cls']
         target_cls = stats['target_cls']
 
+        tp_Threshold = stats['tp_Threshold']
+        conf_Threshold = stats['conf_Threshold']
+        pred_cls_Threshold = stats['pred_cls_Threshold']
+
         # Sort by objectness
         i = np.argsort(-conf)
+        i_T = np.argsort(-conf_Threshold)
         tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+        tp_Threshold, conf_Threshold, pred_cls_Threshold = tp_Threshold[i_T], conf_Threshold[i_T], pred_cls_Threshold[i_T]
 
         # Find unique classes
         unique_classes, nt = np.unique(target_cls, return_counts=True)
         nc = unique_classes.shape[0]  # number of classes, number of detections
 
         # Create Precision-Recall curve and compute AP for each class
-        x, prec_values = np.linspace(0, 1, 1000), []
+        x, prec_values, prec_T_values = np.linspace(0, 1, 1000), [], []
 
         # Average precision, precision and recall curves
         ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+        ap_Threshold, p_curve_Threshold, r_curve_Threshold = np.zeros((nc, tp_Threshold.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+
         for ci, c in enumerate(unique_classes):
             i = pred_cls == c
+            i_T = pred_cls_Threshold == c
+
             n_l = nt[ci]  # number of labels
             n_p = i.sum()  # number of predictions
+            n_p_T = i_T.sum()  # number of predictions
             if n_p == 0 or n_l == 0:
                 continue
 
@@ -124,13 +148,22 @@ class Evaluator:
             fpc = (1 - tp[i]).cumsum(0)
             tpc = tp[i].cumsum(0)
 
+            fpc_T = (1 - tp_Threshold[i_T]).cumsum(0)
+            tpc_T = tp_Threshold[i_T].cumsum(0)
+
             # Recall
             recall = tpc / (n_l + eps)  # recall curve
             r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+            
+            recall_T = tpc_T / (n_l + eps)  # recall curve
+            r_curve_Threshold[ci] = np.interp(-x, -conf_Threshold[i_T], recall_T[:, 0], left=0)  # negative x, xp because xp decreases
 
             # Precision
             precision = tpc / (tpc + fpc)  # precision curve
             p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+
+            precision_T = tpc_T / (tpc_T + fpc_T)  # precision curve
+            p_curve_Threshold[ci] = np.interp(-x, -conf_Threshold[i_T], precision_T[:, 0], left=1)
 
             # AP from recall-precision curve
             for j in range(tp.shape[1]):
@@ -138,14 +171,20 @@ class Evaluator:
                 if j == 0:
                     prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
 
+            for j in range(tp_Threshold.shape[1]):
+                ap_Threshold[ci, j], mpre_T, mrec_T = Evaluator._compute_ap(recall_T[:, j], precision_T[:, j])
+                if j == 0:
+                    prec_T_values.append(np.interp(x, mrec_T, mpre_T))
+
         prec_values = np.array(prec_values)  # (nc, 1000)
+        prec_T_values = np.array(prec_T_values)  # (nc, 1000)
 
         # Compute F1 (harmonic mean of precision and recall)
         f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
         names = [k for k, v in self.class_name.items() if v in unique_classes]  # list: only classes that have data
         names = dict(enumerate(names))  # to dict
 
-        plot_pr_curve(x, prec_values, ap, savePath / "PR_curve.png", names)
+        plot_pr_curve(x, prec_values, ap, prec_T_values, ap_Threshold, savePath / "PR_curve.png", names)
         plot_mc_curve(x, f1_curve, savePath / "F1_curve.png", names, ylabel="F1")
         plot_mc_curve(x, p_curve, savePath / "P_curve.png", names, ylabel="Precision")
         plot_mc_curve(x, r_curve, savePath / "R_curve.png", names, ylabel="Recall")
