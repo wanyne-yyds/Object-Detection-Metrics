@@ -130,9 +130,8 @@ def getBoundingBoxes(directory,
                 splitLine = line.split(" ")
                 idClass = splitLine[0]
                 if len(splitLine) > 6:
-                    box = np.array([float(x) for x in splitLine[1 if isGT else 2:]])[np.newaxis, :]
-                    box = torch.Tensor(box)
-                    xywhr = xyxyxyxy2xywhr(box).numpy().squeeze().tolist()     # returns (centerX, centerY, w, h, rotation)
+                    box = np.array([float(x) for x in splitLine[1 if isGT else 2:]], dtype='float32')[np.newaxis, :]
+                    xywhr = xyxyxyxy2xywhr(box).squeeze().tolist()     # returns (centerX, centerY, w, h, rotation)
                     x, y, w, h, r = xywhr
                     bb = create_bounding_box(nameOfImage, idClass, x, y, w, h, r, coordType, 
                                              imgSize, BBType.GroundTruth if isGT else BBType.Detected, bbFormat, None if isGT else float(splitLine[1]))
@@ -158,10 +157,10 @@ if __name__ == '__main__':
     # Groundtruth folder: folder containing your ground truth bounding boxes
     gtFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_labels_groundtruths"
     # Detection folder: folder containing your detected bounding boxes
-    detFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_pre_labels_Yv8n"
+    detFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_pre_labels_Yv8s_Mob"
     
     # folder where the plots are saved
-    savePath = Path(currentPath) / 'results' / 'Test_obb_pre_labels_Yv8n'
+    savePath = Path(currentPath) / 'results' / 'Test_obb_pre_labels_Yv8s_Mob'
 
     # xywh: <left> <top> <width> <height>) or xyrb: <left> <top> <right> <bottom> or xywhr: xywhr
     gt_format  = 'xywhr'

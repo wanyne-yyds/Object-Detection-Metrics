@@ -14,10 +14,9 @@ def generate_obb_labels(image, points, show=False):
         labels = obj["label"]
         labels = labels.split("_front")[0]
         bbox = np.array(obj["points"], dtype=np.int32).flatten()[np.newaxis, :]
-        bbox = torch.Tensor(bbox)
         xywhr = xyxyxyxy2xywhr(bbox)
-        new_bbox = xywhr2xyxyxyxy(xywhr).numpy().reshape(len(bbox), -1, 2).astype(np.int32)
-        bbox = bbox.numpy().reshape(len(bbox), -1, 2).astype(np.int32)
+        new_bbox = xywhr2xyxyxyxy(xywhr).reshape(len(bbox), -1, 2).astype(np.int32)
+        bbox = bbox.reshape(len(bbox), -1, 2).astype(np.int32)
         polylines_bbox.append(bbox)
         polylines_new_bbox.append(new_bbox)
         labels_list.append([labels, new_bbox.flatten().tolist()])
@@ -35,7 +34,7 @@ if __name__ == '__main__':
     output = Path(files_dir + "_obb_labels")
     output.mkdir(exist_ok=True, parents=True)
 
-    show_img = False
+    show_img = True
 
     for img_file in Path(files_dir).rglob("*.*g"):
         json_file = img_file.with_suffix(".json")
