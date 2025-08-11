@@ -49,7 +49,6 @@ import glob
 import os
 import shutil
 import sys
-import torch
 from pathlib import Path
 
 # parent_path = os.path.abspath(os.path.join(__file__, *(['..'])))
@@ -58,7 +57,7 @@ from pathlib import Path
 from lib.BoundingBox import BoundingBox
 from lib.BoundingBoxes import BoundingBoxes
 from lib.Evaluator import *
-from lib.utils import BBFormat, xyxyxyxy2xywhr
+from lib.utils import BBFormat
 
 # Validate formats
 def ValidateFormats(argFormat):
@@ -66,12 +65,10 @@ def ValidateFormats(argFormat):
         return BBFormat.XYWH
     elif argFormat == 'xyrb':
         return BBFormat.XYX2Y2
-    elif argFormat == 'xywhr':
-        return BBFormat.XYWHR
     elif argFormat is None:
         return BBFormat.XYWH  # default when nothing is passed
     else:
-        assert False, 'argument %s: invalid value. It must be either \'xywh\' or \'xyrb\' or \'xywhr\'' % argFormat
+        assert False, 'argument %s: invalid value. It must be either \'xywh\' or \'xyrb\'' % argFormat
 
 # Validate coordinate types
 def ValidateCoordinatesTypes(arg):
@@ -83,17 +80,6 @@ def ValidateCoordinatesTypes(arg):
         return CoordinatesType.Absolute  # default when nothing is passed
     else:
         assert False, 'argument %s: invalid value. It must be either \'abs\' or \'rel\'' % arg
-
-def create_bounding_box(nameOfImage, idClass, x, y, w, h, 
-                        r=None, coordType=None, imgSize=None, bbType=None, bbFormat=None, confidence=None):
-    if r is not None:
-        return BoundingBox(nameOfImage, idClass, x, y, w, h, r, 
-                           typeCoordinates=coordType, imgSize=imgSize, bbType=bbType, 
-                           classConfidence=confidence, format=bbFormat)
-    else:
-        return BoundingBox(nameOfImage, idClass, x, y, w, h, 
-                           typeCoordinates=coordType, imgSize=imgSize, bbType=bbType, 
-                           classConfidence=confidence, format=bbFormat)
 
 def getBoundingBoxes(directory,
                      isGT,
@@ -107,12 +93,10 @@ def getBoundingBoxes(directory,
         allBoundingBoxes = BoundingBoxes()
     if allClasses is None:
         allClasses = []
-
     # Read ground truths
     os.chdir(directory)
     files = glob.glob("**/*.txt", recursive=True)
     files.sort()
-
     # Read GT detections from txt file
     # Each line of the files in the groundtruths folder represents a ground truth bounding box
     # (bounding boxes that a detector should detect)
@@ -122,31 +106,57 @@ def getBoundingBoxes(directory,
     # x2, y2 represents the most bottom-right coordinates of the bounding box
     for f in files:
         nameOfImage = f.replace(".txt", "")
-        with open(f, "r") as fh1:
-            for line in fh1:
-                line = line.replace("\n", "")
-                if line.replace(' ', '') == '':
+        fh1 = open(f, "r")
+        for line in fh1:
+            line = line.replace("\n", "")
+            if line.replace(' ', '') == '':
+                continue
+            splitLine = line.split(" ")
+            if isGT:
+                # idClass = int(splitLine[0]) #class
+                idClass = (splitLine[0])  # class
+                x = float(splitLine[1])
+                y = float(splitLine[2])
+                w = float(splitLine[3])
+                h = float(splitLine[4])
+                bb = BoundingBox(nameOfImage,
+                                 idClass,
+                                 x,
+                                 y,
+                                 w,
+                                 h,
+                                 None,
+                                 coordType,
+                                 imgSize,
+                                 BBType.GroundTruth,
+                                 None,
+                                 format=bbFormat)
+            else:
+                # idClass = int(splitLine[0]) #class
+                idClass = (splitLine[0])  # class
+                if idClass == "zebra":
                     continue
-                splitLine = line.split(" ")
-                idClass = splitLine[0]
-                if len(splitLine) > 6:
-                    box = np.array([float(x) for x in splitLine[1 if isGT else 2:]], dtype='float32')[np.newaxis, :]
-                    xywhr = xyxyxyxy2xywhr(box).squeeze().tolist()     # returns (centerX, centerY, w, h, rotation)
-                    x, y, w, h, r = xywhr
-                    bb = create_bounding_box(nameOfImage, idClass, x, y, w, h, r, coordType, 
-                                             imgSize, BBType.GroundTruth if isGT else BBType.Detected, bbFormat, None if isGT else float(splitLine[1]))
-                else:
-                    # idClass = int(splitLine[0]) #class
-                    x = float(splitLine[1 if isGT else 2])
-                    y = float(splitLine[2 if isGT else 3])
-                    w = float(splitLine[3 if isGT else 4])
-                    h = float(splitLine[4 if isGT else 5])
-                    bb = create_bounding_box(nameOfImage, idClass, x, y, w, h, None, coordType, 
-                                             imgSize, BBType.GroundTruth if isGT else BBType.Detected, bbFormat, None if isGT else float(splitLine[1]))
-
-                allBoundingBoxes.addBoundingBox(bb)
-                if idClass not in allClasses:
-                    allClasses.append(idClass)
+                confidence = float(splitLine[1])
+                x = float(splitLine[2])
+                y = float(splitLine[3])
+                w = float(splitLine[4])
+                h = float(splitLine[5])
+                bb = BoundingBox(nameOfImage,
+                                 idClass,
+                                 x,
+                                 y,
+                                 w,
+                                 h,
+                                 None,
+                                 coordType,
+                                 imgSize,
+                                 BBType.Detected,
+                                 confidence,
+                                 format=bbFormat)
+            allBoundingBoxes.addBoundingBox(bb)
+            if idClass not in allClasses:
+                allClasses.append(idClass)
+        fh1.close()
     return allBoundingBoxes, allClasses
 
 
@@ -155,16 +165,16 @@ if __name__ == '__main__':
     currentPath = os.path.dirname(os.path.abspath(__file__))
 
     # Groundtruth folder: folder containing your ground truth bounding boxes
-    gtFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_labels_groundtruths"
+    gtFolder = r"E:\Code\Object-Detection-Metrics\bsd_test\gt"
     # Detection folder: folder containing your detected bounding boxes
-    detFolder = r"E:\Code\Object-Detection-Metrics\test_dataset\Test_obb_pre_labels_Yv8s_Mob"
-    
-    # folder where the plots are saved
-    savePath = Path(currentPath) / 'results' / 'Test_obb_pre_labels_Yv8s_Mob'
+    detFolder = r"E:\Code\Object-Detection-Metrics\bsd_test\pre_rv1126b_qt"
 
-    # xywh: <left> <top> <width> <height>) or xyrb: <left> <top> <right> <bottom> or xywhr: xywhr
-    gt_format  = 'xywhr'
-    det_format = 'xywhr'
+    # folder where the plots are saved
+    savePath = Path(currentPath) / 'results' / "bsd_rv1126b_qt___"
+
+    # xywh: <left> <top> <width> <height>) or xyrb: <left> <top> <right> <bottom>
+    gt_format  = 'xyrb'
+    det_format = 'xyrb'
 
     # IOU threshold.
     iouThreshold = 0.5
@@ -238,58 +248,46 @@ if __name__ == '__main__':
     acc_AP = 0
     validClasses = 0
 
-    # Plot Precision YOLOv8 Recall curve
-    detections = evaluator.PlotYOLOv8PrecisionRecallCurve(
-        allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
-        OBB=True,
-        savePath=savePath,)
-
-    for name, metrics in detections.items():
-        metrics = np.array(metrics).flatten()
-        print(f"Class: {name}\tP: {metrics[0]:.3f}\tR: {metrics[1]:.3f}\tmAP50: {metrics[2]:.3f}\tmAP50-95: {metrics[3]:.3f}")
-
     # Plot Precision x Recall curve
-    # detections = evaluator.PlotPrecisionRecallCurve(
-    #     allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
-    #     IOUThreshold=iouThreshold,  # IOU threshold
-    #     method=MethodAveragePrecision.EveryPointInterpolation,
-    #     showAP=True,  # Show Average Precision in the title of the plot
-    #     obb=True,
-    #     showInterpolatedPrecision=False,  # Don't plot the interpolated precision curve
-    #     savePath=savePath,
-    #     showGraphic=showPlot)
-    
-    # f = open(os.path.join(savePath, 'results.txt'), 'w')
-    # f.write('Object Detection Metrics\n')
-    # f.write('https://github.com/rafaelpadilla/Object-Detection-Metrics\n\n\n')
-    # f.write('Average Precision (AP), Precision and Recall per class:')
+    detections = evaluator.PlotPrecisionRecallCurve(
+        allBoundingBoxes,  # Object containing all bounding boxes (ground truths and detections)
+        IOUThreshold=iouThreshold,  # IOU threshold
+        method=MethodAveragePrecision.EveryPointInterpolation,
+        showAP=True,  # Show Average Precision in the title of the plot
+        showInterpolatedPrecision=False,  # Don't plot the interpolated precision curve
+        savePath=savePath,
+        showGraphic=showPlot)
 
-    # # each detection is a class
-    # for metricsPerClass in detections:
+    f = open(os.path.join(savePath, 'results.txt'), 'w')
+    f.write('Object Detection Metrics\n')
+    f.write('https://github.com/rafaelpadilla/Object-Detection-Metrics\n\n\n')
+    f.write('Average Precision (AP), Precision and Recall per class:')
 
-    #     # Get metric values per each class
-    #     cl = metricsPerClass['class']
-    #     ap = metricsPerClass['AP']
-    #     precision = metricsPerClass['precision']
-    #     recall = metricsPerClass['recall']
-    #     totalPositives = metricsPerClass['total positives']
-    #     total_TP = metricsPerClass['total TP']
-    #     total_FP = metricsPerClass['total FP']
+    # each detection is a class
+    for metricsPerClass in detections[0]:
+        # Get metric values per each class
+        cl = metricsPerClass['class']
+        ap = metricsPerClass['AP']
+        precision = metricsPerClass['precision']
+        recall = metricsPerClass['recall']
+        totalPositives = metricsPerClass['total positives']
+        total_TP = metricsPerClass['total TP']
+        total_FP = metricsPerClass['total FP']
 
-    #     if totalPositives > 0:
-    #         validClasses = validClasses + 1
-    #         acc_AP = acc_AP + ap
-    #         prec = ['%.2f' % p for p in precision]
-    #         rec = ['%.2f' % r for r in recall]
-    #         ap_str = "{0:.2f}%".format(ap * 100)
-    #         # ap_str = "{0:.4f}%".format(ap * 100)
-    #         print('AP: %s (%s)' % (ap_str, cl))
-    #         f.write('\n\nClass: %s' % cl)
-    #         f.write('\nAP: %s' % ap_str)
-    #         f.write('\nPrecision: %s' % prec)
-    #         f.write('\nRecall: %s' % rec)
+        if totalPositives > 0:
+            validClasses = validClasses + 1
+            acc_AP = acc_AP + ap
+            prec = ['%.2f' % p for p in precision]
+            rec = ['%.2f' % r for r in recall]
+            ap_str = "{0:.2f}%".format(ap * 100)
+            # ap_str = "{0:.4f}%".format(ap * 100)
+            print('AP: %s (%s)' % (ap_str, cl))
+            f.write('\n\nClass: %s' % cl)
+            f.write('\nAP: %s' % ap_str)
+            f.write('\nPrecision: %s' % prec)
+            f.write('\nRecall: %s' % rec)
 
-    # mAP = acc_AP / validClasses
-    # mAP_str = "{0:.2f}%".format(mAP * 100)
-    # print('mAP: %s' % mAP_str)
-    # f.write('\n\n\nmAP: %s' % mAP_str)
+    mAP = acc_AP / validClasses
+    mAP_str = "{0:.2f}%".format(mAP * 100)
+    print('mAP: %s' % mAP_str)
+    f.write('\n\n\nmAP: %s' % mAP_str)
